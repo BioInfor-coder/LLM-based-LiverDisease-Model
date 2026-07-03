@@ -105,4 +105,4 @@ pip install torch transformers
 pip install gensim numpy
 ```
 
-Python >= 3.9. The Transformer-based embedding scripts also require a GPU environment and locally downloaded model weights.
+Python >= 3.8. The Transformer-based embedding scripts also require a GPU environment and locally downloaded model weights.
