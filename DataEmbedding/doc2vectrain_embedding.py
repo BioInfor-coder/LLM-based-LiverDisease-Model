@@ -1,31 +1,5 @@
 # -*- coding: utf-8 -*-
 
-"""
-Copyright: CPMMI
-Description:
-    File Name   : doc2vec_embedding.py
-    Description : 使用 Doc2Vec 模型对文本进行向量化编码，保持与
-                  Transformer embedding 脚本相同的输入输出格式：
-                  逐行读取文本文件，输出每行对应的固定维度向量。
-                  支持训练新模型或加载已有模型两种模式。
-    Dependency  : gensim, numpy
-History:
-    Author : Li, Xinming
-    Date   : 2026.04.20
-    Version: 1.0
-    Summary of Version: 基于 gensim Doc2Vec 实现文本向量化，
-                        模仿 BGE-M3 脚本的输入输出接口。
-History:
-    Author : Li, Xinming
-    Date   : 2026.07.03
-    Version: 1.1
-    Summary of Version: 移除入口处硬编码的路径与超参数配置区，改为
-        argparse命令行参数传入（--input_path/--output_path/
-        --vector_size/--min_count/--epochs/--window/--dm/--workers/
-        --infer_epochs/--seed/--model_save_path/--model_load_path/
-        --no_normalize），便于复用与自动化调用。
-"""
-
 # 标准库
 import argparse
 import os
