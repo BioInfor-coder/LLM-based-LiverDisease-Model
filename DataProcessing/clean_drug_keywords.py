@@ -1,52 +1,5 @@
 # -*- coding: utf-8 -*-
 
-"""
-Copyright: CPMMI
-Description:
-    File Name   : clean_drug_keywords.py
-    Description : 读取一个 txt 文件，逐行处理，将药品关键词词典
-                  （DRUG_DICT 各类别别名 + DILI_KEYWORDS）中出现过的
-                  所有关键词从文本中清洗（删除）掉，用于对含药品名的
-                  自由文本做脱敏/清洗，输出清洗后的 txt。
-    Dependency  : None（仅使用标准库 os、re）
-History:
-    Author : Li, Xinming
-    Date   : 2026.07.03
-    Version: 4.0
-    Summary of Version:
-        在 match_prescription.py（v3.0）基础上精简：
-        - 移除原有 Excel 用药建议 vs 医嘱内容 匹配、P/R/F1 指标计算、
-          extract_drugs、compute_pr_metrics、run_match_mode 等全部
-          "命中数/匹配统计"相关代码及 pandas 依赖；
-        - 仅保留文本关键词清洗功能：复用原 DRUG_DICT（23个类别别名）
-          与 DILI_KEYWORDS 词典，合并去重后按字符串长度降序排序，
-          构建单一大正则，逐行对 txt 文本做 sub("") 清洗，避免短别名
-          抢先命中导致长别名被截断残留碎片；
-        - 清洗后对因删词产生的多余空白做归并，并输出每类关键词的
-          清洗命中次数统计，便于核查清洗效果。
-History:
-    Author : Li, Xinming
-    Date   : 2026.07.03
-    Version: 4.1
-    Summary of Version:
-        移除硬编码配置区，改为 argparse 命令行参数调用：
-        --input/-i（必填，输入txt路径）、--output/-o（必填，输出txt路径）、
-        --encoding（默认utf-8）、--keep-whitespace（关闭空白归并，默认开启）。
-        用法示例:
-            python clean_drug_keywords.py -i raw.txt -o cleaned.txt
-History:
-    Author : Li, Xinming
-    Date   : 2026.07.03
-    Version: 4.2
-    Summary of Version:
-        按用户提供的"高泄露风险词"表核对后，补充此前词典未覆盖的
-        56 项，新增 4 个类别（24~27：AIH/PBC/HBV/DILI 临床描述及
-        扩展用药），并将 8 个此前只能被"部分清洗"（命中子串后残留
-        括号/前后缀）的完整短语一并加入，使其能被整体清洗掉。
-        其中 DILI 类别新增了独立词条"停药"——注意 match_prescription.py
-        v2.3 出于避免匹配误触发曾删除该裸词，但本脚本已不做诊断匹配，
-        仅做文本删除清洗，因此按用户要求恢复该词以提高清洗覆盖率。
-"""
 
 # 标准库
 import argparse
