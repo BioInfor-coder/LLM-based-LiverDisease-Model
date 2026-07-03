@@ -83,7 +83,7 @@ Trains (or loads) a Doc2Vec model and infers a fixed-dimension vector per text l
 python DataEmbedding/doc2vec_embedding.py \
   --input_path ./data/total.txt \
   --output_path ./data/total_afterembedding_doc2vec.txt \
-  --vector_size 384 --epochs 40 --model_save_path ./doc2vec_model.bin
+  --vector_size 4096 --epochs 40 --model_save_path ./doc2vec_model.bin
 ```
 
 ## Requirements
