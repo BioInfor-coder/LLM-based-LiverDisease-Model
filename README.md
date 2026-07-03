@@ -9,7 +9,7 @@ Six standalone scripts for clinical data extraction, de-identification, data cle
 │   ├── LLM_embedding.py
 │   ├── bge_m3_embedding.py
 │   └── doc2vec_embedding.py
-├── dataprocessing/
+├── DataProcessing/
 │   ├── data_preprocessing.py
 │   ├── clean_drug_keywords.py
 │   └── clean_lab_results.py
