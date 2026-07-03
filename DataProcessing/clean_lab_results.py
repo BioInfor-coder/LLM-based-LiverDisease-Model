@@ -1,25 +1,5 @@
 # -*- coding: utf-8 -*-
 
-"""
-Copyright: CPMMI
-Description:
-    File Name   : clean_lab_results.py
-    Description : 清洗检验结果宽表（阴阳性归一化、科学计数法/比较符号
-                  归一化），并对标记为缺失（默认-1）的连续型数值列做
-                  KNN插值；分类变量（如阴阳性0/1、比较符号字符串等）
-                  不参与插值，缺失值保持原样。
-    Dependency  : pandas, scikit-learn, openpyxl
-History:
-    Author : Li, Xinming
-    Date   : 2026.07.03
-    Version: 1.0
-    Summary of Version: 在原始清洗脚本基础上去除重复函数定义与重复
-        import，修复原脚本中 clean_dataframe 被覆盖导致部分清洗步骤
-        失效的问题；移除硬编码输入/输出路径，改为argparse命令行参数
-        （--input_path/--output_path/--missing_value/--n_neighbors/
-        --exclude_columns）；新增按列类型区分（分类 vs 连续）的KNN
-        缺失值插值逻辑。
-"""
 
 # 标准库
 import argparse
