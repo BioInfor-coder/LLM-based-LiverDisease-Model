@@ -1,6 +1,6 @@
-# Liver Disease Data Pipeline & LLM Embedding Tools
+# Liver Disease Data Processing & LLM Embedding Tools
 
-Six standalone scripts for clinical data extraction, de-identification, data cleaning/imputation, and text embedding (LLM-based, BGE-M3-based, and Doc2Vec-based).
+Six standalone scripts for clinical data extraction, de-identification, data cleaning/imputation, and text embedding (Qwen3-based,Huatuo-o1-based,IIMedical-based, BGE-M3-based, and Doc2Vec-based).
 
 ## Repository Structure
 
