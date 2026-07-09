@@ -2,15 +2,12 @@
 
 # 标准库
 import argparse
-import datetime
 import json
-import os
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 # 第三方库
-import mysql.connector
 import pandas as pd
 
 
@@ -18,153 +15,43 @@ import pandas as pd
 # 全局常量（原脚本中的魔法数字统一在此声明）
 # ============================================================
 NEGATIVE_RESULT_FLAG = -1          # 检验结果缺失/未查的占位值
-MISSING_RATIO_THRESHOLD = 0.6      # 阶段四：非缺失检验项占比阈值
-MIN_ADULT_AGE = 18                 # 阶段四：成年判定年龄下限
-MERGED_JSON_SUFFIX = "_merged.json"  # 阶段二起统一使用的合并文件后缀
+MISSING_RATIO_THRESHOLD = 0.6      # 阶段三：非缺失检验项占比阈值
+MIN_ADULT_AGE = 18                 # 阶段三：成年判定年龄下限
 
 
 # ============================================================
-# 阶段一：从 MySQL 数据库提取单患者结构化 JSON
+# 共享工具：读取单患者 JSON（兼容「单条字典」与「[字典]列表」两种存储格式）
 # ============================================================
-def _json_datetime_default(obj: Any) -> str:
+def load_patient_json(fp: Path) -> Optional[Dict[str, Any]]:
     """
-    json.dump 的自定义序列化函数，用于处理 datetime 类型字段
+    读取单患者 JSON 文件，并统一为字典格式返回
 
     参数:
-        obj: 待序列化对象
+        fp: 单患者 JSON 文件路径
 
     返回值:
-        格式化后的时间字符串
+        单患者结构化字典；若文件内容既不是字典也不是「[字典]」列表，
+        或读取/解析失败，则返回 None
 
     异常:
-        TypeError: 当对象既不是 datetime 也无法序列化时
+        无（内部捕获所有异常，失败时返回 None 并打印提示）
     """
-    if isinstance(obj, datetime.datetime):
-        return obj.strftime("%Y-%m-%d %H:%M:%S")
-    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
-
-
-def query_patient_record(cursor: Any, patient_id: str, lab_table_config: Dict[str, List[str]]) -> Dict[str, Any]:
-    """
-    根据患者编号查询各业务表并汇总为单患者结构化字典
-
-    参数:
-        cursor: mysql-connector 的 dictionary cursor
-        patient_id: 患者编号
-        lab_table_config: 患者编号 -> 检验结果表名列表 的映射（来自 config.json）
-
-    返回值:
-        包含病理、超声、放射、胃镜、诊断、检验、主诉等字段的字典
-    """
-    record: Dict[str, Any] = {
-        "患者编号": patient_id,
-        "病理": [],
-        "超声": [],
-        "放射": [],
-        "胃镜": [],
-        "诊断": [],
-        "检验": [],
-        "主诉": [],
-    }
-
-    # 1. 病理 / 超声 / 放射 / 胃镜：结构一致，逐表查询
-    simple_table_map = {
-        "病理": ("bingli_result", "患者ID", "标本接收时间"),
-        "超声": ("chaosheng_result", "患者编号", "检查时间"),
-        "放射": ("fangshe_result", "患者编号", "检查时间"),
-        "胃镜": ("weijing_result", "患者编号", "检查时间"),
-    }
-    for field, (table, id_col, order_col) in simple_table_map.items():
-        query = f"SELECT * FROM {table} WHERE {id_col} = %s ORDER BY {order_col};"
-        cursor.execute(query, (patient_id,))
-        record[field] = cursor.fetchall()
-
-    # 2. 旧诊断信息（多张历史表拼接后统一改名为标准字段）
-    legacy_diagnosis_tables = ["shuju2010-2015", "shuju2016-2020", "shuju2016-2020", "shuju2023-2025"]
-    legacy_rows: List[Dict[str, Any]] = []
-    for table in legacy_diagnosis_tables:
-        query = f"SELECT * FROM `{table}` WHERE 患者编号 = %s ORDER BY 就诊日期;"
-        cursor.execute(query, (patient_id,))
-        legacy_rows.extend(cursor.fetchall())
-
-    for row in legacy_rows:
-        record["诊断"].append({
-            "就诊日期": row["就诊日期"],
-            "患者编号": row["患者编号"],
-            "患者身份证号": row["身份证号"],
-            "姓名": row["姓名"],
-            "诊疗科室": row["就诊科室"],
-            "医保类型": "",
-            "性别": row["性别"],
-            "医生姓名": row["就诊医生"],
-            "就诊流水号": row["就诊流水号"],
-            "诊断名称": row["诊断内容"],
-            "医嘱名称": row["医嘱内容"],
-        })
-
-    # 3. 新诊断系统信息
-    query = "SELECT * FROM `shujuxinxitong` WHERE 患者编号 = %s ORDER BY 就诊日期;"
-    cursor.execute(query, (patient_id,))
-    record["诊断"].extend(cursor.fetchall())
-
-    # 4. 主诉信息
-    query = "SELECT * FROM `zhusu_result` WHERE 患者编号 = %s ORDER BY 创建时间;"
-    cursor.execute(query, (patient_id,))
-    record["主诉"] = cursor.fetchall()
-
-    # 5. 检验信息：需按 config.json 中登记的表名逐一查询
-    formatted_key = str(patient_id).zfill(10)
-    lab_tables = lab_table_config.get(formatted_key)
-    if lab_tables:
-        for table in lab_tables:
-            query = f"SELECT * FROM {table} WHERE 患者编号 = %s ORDER BY 检验日期;"
-            cursor.execute(query, (patient_id,))
-            record["检验"].extend(cursor.fetchall())
-
-    return record
-
-
-def extract_patient_jsons(
-    db_config: Dict[str, Any],
-    lab_table_config: Dict[str, List[str]],
-    patient_ids: List[str],
-    save_dir: Path,
-) -> None:
-    """
-    批量从数据库提取患者数据并逐一保存为单患者 JSON 文件
-
-    参数:
-        db_config: mysql-connector 连接参数（host/port/user/password/database）
-        lab_table_config: 患者编号 -> 检验表名列表 的映射
-        patient_ids: 待提取的患者编号列表
-        save_dir: JSON 输出目录，单患者文件命名为 `{patient_id}.json`
-
-    返回值:
-        无（副作用为写文件）
-
-    异常:
-        mysql.connector.Error: 数据库连接或查询失败时
-    """
-    save_dir.mkdir(parents=True, exist_ok=True)
-
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor(dictionary=True, buffered=False)  # buffered=False 流式读取，降低内存占用
-
     try:
-        for patient_id in patient_ids:
-            out_path = save_dir / f"{patient_id}.json"
-            if out_path.exists():
-                continue  # 断点续跑：已提取过的患者直接跳过
+        raw = json.loads(fp.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[读取] ❌ 无法读取 {fp.name}：{e}")
+        return None
 
-            record = query_patient_record(cursor, patient_id, lab_table_config)
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump([record], f, ensure_ascii=False, indent=4, default=_json_datetime_default)
-            print(f"[阶段一] {datetime.datetime.now()} 已提取患者 {patient_id}")
-    finally:
-        cursor.close()
-        conn.close()
+    if isinstance(raw, list):
+        if not raw or not isinstance(raw[0], dict):
+            print(f"[读取] ❌ 文件内容为空列表或格式异常：{fp.name}")
+            return None
+        return raw[0]
+    if isinstance(raw, dict):
+        return raw
 
-    print(f"✅ [阶段一] 数据库提取完成，输出目录：{save_dir}")
+    print(f"[读取] ❌ 不支持的 JSON 顶层结构：{fp.name}")
+    return None
 
 
 # ============================================================
@@ -190,7 +77,7 @@ def extract_age_gender_from_labs(lab_records: List[Dict[str, Any]]) -> Tuple[Opt
 
 
 # ============================================================
-# 阶段二：筛除「检验」字段为空的样本
+# 阶段一：筛除「检验」字段为空的样本（原阶段二）
 # ============================================================
 def keep_non_empty_lab(src_file: Path, dst_file: Path) -> bool:
     """
@@ -203,7 +90,10 @@ def keep_non_empty_lab(src_file: Path, dst_file: Path) -> bool:
     返回值:
         True 表示保留并写出，False 表示跳过
     """
-    data = json.loads(src_file.read_text(encoding="utf-8"))
+    data = load_patient_json(src_file)
+    if data is None:
+        return False
+
     if data.get("检验"):
         dst_file.parent.mkdir(parents=True, exist_ok=True)
         dst_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -211,29 +101,29 @@ def keep_non_empty_lab(src_file: Path, dst_file: Path) -> bool:
     return False
 
 
-def filter_empty_lab_batch(merged_dir: Path, filtered_dir: Path, file_pattern: str) -> None:
+def filter_empty_lab_batch(raw_dir: Path, filtered_dir: Path, file_pattern: str) -> None:
     """
     批量筛选：仅保留检验非空的样本文件
 
     参数:
-        merged_dir: 输入目录（阶段一输出或人工合并后的目录）
+        raw_dir: 输入目录（本地已存在的单患者 JSON 文件目录）
         filtered_dir: 输出目录
-        file_pattern: glob 匹配模式，如 "*.json" 或 "*_merged.json"
+        file_pattern: glob 匹配模式，如 "*.json"
 
     返回值:
         无
     """
     filtered_dir.mkdir(parents=True, exist_ok=True)
-    for fp in merged_dir.rglob(file_pattern):
-        out_fp = filtered_dir / fp.relative_to(merged_dir)
+    for fp in raw_dir.rglob(file_pattern):
+        out_fp = filtered_dir / fp.relative_to(raw_dir)
         if keep_non_empty_lab(fp, out_fp):
-            print(f"[阶段二] ✅ 保留：{fp.name}")
+            print(f"[阶段一] ✅ 保留：{fp.name}")
         else:
-            print(f"[阶段二] 🚫 跳过（检验为空）：{fp.name}")
+            print(f"[阶段一] 🚫 跳过（检验为空或读取失败）：{fp.name}")
 
 
 # ============================================================
-# 阶段三：删除「检验」结果全部为 -1（占位值）的样本
+# 阶段二：删除「检验」结果全部为 -1（占位值）的样本（原阶段三）
 # ============================================================
 def is_all_negative(test_items: List[Dict[str, Any]]) -> bool:
     """
@@ -262,33 +152,31 @@ def remove_all_negative_samples(json_folder: Path) -> None:
         无
     """
     if not json_folder.is_dir():
-        print(f"[阶段三] ❌ 路径不存在：{json_folder}")
+        print(f"[阶段二] ❌ 路径不存在：{json_folder}")
         return
 
-    print(f"[阶段三] 🔍 正在检查文件夹：{json_folder}")
+    print(f"[阶段二] 🔍 正在检查文件夹：{json_folder}")
     for fp in json_folder.glob("*.json"):
-        try:
-            data = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception as e:
-            print(f"[阶段三] ❌ 无法读取 {fp.name}：{e}")
+        data = load_patient_json(fp)
+        if data is None:
             continue
 
         test_items = data.get("检验")
         if not isinstance(test_items, list):
-            print(f"[阶段三] 跳过（检验字段缺失或不是列表）：{fp.name}")
+            print(f"[阶段二] 跳过（检验字段缺失或不是列表）：{fp.name}")
             continue
 
         if is_all_negative(test_items):
             fp.unlink()
-            print(f"[阶段三] 🗑️ 删除：{fp.name}（所有结果均为 -1）")
+            print(f"[阶段二] 🗑️ 删除：{fp.name}（所有结果均为 -1）")
         else:
-            print(f"[阶段三] ✅ 保留：{fp.name}")
+            print(f"[阶段二] ✅ 保留：{fp.name}")
 
-    print("[阶段三] ✅ 清理完成！")
+    print("[阶段二] ✅ 清理完成！")
 
 
 # ============================================================
-# 阶段四：按检验缺失率与年龄进一步筛选，并输出统计 CSV
+# 阶段三：按检验缺失率与年龄进一步筛选，并输出统计 CSV（原阶段四）
 # ============================================================
 def compute_non_negative_ratio(test_items: List[Dict[str, Any]]) -> Tuple[int, int, int, float]:
     """
@@ -317,7 +205,7 @@ def filter_by_missing_ratio_and_age(
     统计各样本检验缺失情况，保留“非缺失占比 > threshold 且成年”的样本
 
     参数:
-        json_folder: 输入 JSON 文件夹（阶段三输出）
+        json_folder: 输入 JSON 文件夹（阶段二输出）
         output_csv: 统计结果输出 CSV 路径
         filtered_folder: 符合条件的样本转存目录
         threshold: 非 -1 占比阈值，默认 MISSING_RATIO_THRESHOLD
@@ -326,24 +214,22 @@ def filter_by_missing_ratio_and_age(
         每个样本检验统计信息的 DataFrame
     """
     if not json_folder.is_dir():
-        print(f"[阶段四] ❌ 路径不存在：{json_folder}")
+        print(f"[阶段三] ❌ 路径不存在：{json_folder}")
         return pd.DataFrame()
 
     filtered_folder.mkdir(parents=True, exist_ok=True)
-    print(f"[阶段四] 🔍 正在统计文件夹：{json_folder}")
+    print(f"[阶段三] 🔍 正在统计文件夹：{json_folder}")
 
     result_rows: List[Dict[str, Any]] = []
 
     for fp in json_folder.glob("*.json"):
-        try:
-            data = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception as e:
-            print(f"[阶段四] ❌ 无法读取 {fp.name}：{e}")
+        data = load_patient_json(fp)
+        if data is None:
             continue
 
         test_items = data.get("检验")
         if not isinstance(test_items, list):
-            print(f"[阶段四] 跳过（检验字段缺失或不是列表）：{fp.name}")
+            print(f"[阶段三] 跳过（检验字段缺失或不是列表）：{fp.name}")
             continue
 
         total, neg_count, non_neg_count, non_neg_ratio = compute_non_negative_ratio(test_items)
@@ -355,36 +241,35 @@ def filter_by_missing_ratio_and_age(
             "结果非 -1 占比": non_neg_ratio,
         })
 
-        # 检验记录为空则本样本无法判断年龄，跳过（原脚本此处误用 return False
-        # 会导致整个批处理提前退出，此处修正为 continue，仅跳过当前文件）
+        # 检验记录为空则本样本无法判断年龄，跳过当前文件（不影响其余文件的批处理）
         if not test_items:
             continue
 
         age, _ = extract_age_gender_from_labs(test_items)
         if age is None:
-            print(f"[阶段四] 跳过（无法提取年龄）：{fp.name}")
+            print(f"[阶段三] 跳过（无法提取年龄）：{fp.name}")
             continue
 
         try:
             age_value = int(age)
         except (ValueError, TypeError):
-            print(f"[阶段四] 跳过（年龄字段无法解析）：{fp.name}")
+            print(f"[阶段三] 跳过（年龄字段无法解析）：{fp.name}")
             continue
 
         # ✅ 非 -1 占比 > threshold 且年龄 >= 成年下限，转存文件
         if non_neg_ratio > threshold and age_value >= MIN_ADULT_AGE:
             shutil.copy(fp, filtered_folder / fp.name)
-            print(f"[阶段四] ✅ 已转存：{fp.name}（非 -1 占比={non_neg_ratio:.2%}）")
+            print(f"[阶段三] ✅ 已转存：{fp.name}（非 -1 占比={non_neg_ratio:.2%}）")
 
     df = pd.DataFrame(result_rows)
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
-    print(f"[阶段四] ✅ 统计完成！CSV 保存到：{output_csv}")
-    print(f"[阶段四] ✅ 过滤后文件保存到：{filtered_folder}")
+    print(f"[阶段三] ✅ 统计完成！CSV 保存到：{output_csv}")
+    print(f"[阶段三] ✅ 过滤后文件保存到：{filtered_folder}")
     return df
 
 
 # ============================================================
-# 阶段五：JSON 转自然语言文本 + 检验项宽表汇总
+# 阶段四：JSON 转自然语言文本 + 检验项宽表汇总（原阶段五）
 # ============================================================
 def _clean_text(txt: Any) -> str:
     """
@@ -450,7 +335,7 @@ def merge_all_to_nl(root_dirs: List[Path], class_labels: List[int], save_dir: Pa
         root_dirs: 各疾病样本所在目录列表（与 class_labels 一一对应）
         class_labels: 各目录对应的类别标签
         save_dir: 输出目录，生成 total.txt（文本）与 labels.txt（标签）
-        file_pattern: glob 匹配模式，如 "*.json" 或 "*_merged.json"
+        file_pattern: glob 匹配模式，如 "*.json"
 
     返回值:
         无
@@ -462,11 +347,14 @@ def merge_all_to_nl(root_dirs: List[Path], class_labels: List[int], save_dir: Pa
     with open(total_f, "w", encoding="utf-8") as f_txt, open(label_f, "w", encoding="utf-8") as f_lbl:
         for label, folder in zip(class_labels, root_dirs):
             for fp in folder.rglob(file_pattern):
-                nl = json_to_nl(json.loads(fp.read_text(encoding="utf-8")))
+                data = load_patient_json(fp)
+                if data is None:
+                    continue
+                nl = json_to_nl(data)
                 f_txt.write(nl + "\n")
                 f_lbl.write(f"{label}\n")
 
-    print(f"[阶段五] ✅ 自然语言合并完成！共生成：\n  {total_f}\n  {label_f}")
+    print(f"[阶段四] ✅ 自然语言合并完成！共生成：\n  {total_f}\n  {label_f}")
 
 
 def create_lab_wide_table(root_dirs: List[Path], class_labels: List[int], save_path: Path, file_pattern: str) -> pd.DataFrame:
@@ -477,7 +365,7 @@ def create_lab_wide_table(root_dirs: List[Path], class_labels: List[int], save_p
         root_dirs: 各疾病样本所在目录列表（与 class_labels 一一对应）
         class_labels: 各目录对应的类别标签
         save_path: 输出 Excel 文件路径
-        file_pattern: glob 匹配模式，如 "*.json" 或 "*_merged.json"
+        file_pattern: glob 匹配模式，如 "*.json"
 
     返回值:
         汇总后的宽表 DataFrame
@@ -489,9 +377,8 @@ def create_lab_wide_table(root_dirs: List[Path], class_labels: List[int], save_p
         source_name = folder.name
 
         for fp in folder.rglob(file_pattern):
-            try:
-                data = json.loads(fp.read_text(encoding="utf-8"))
-            except Exception:
+            data = load_patient_json(fp)
+            if data is None:
                 continue
 
             row: Dict[str, Any] = {
@@ -529,74 +416,65 @@ def create_lab_wide_table(root_dirs: List[Path], class_labels: List[int], save_p
     df = df.reindex(columns=front_cols + other_cols)
 
     df.to_excel(save_path, index=False)
-    print(f"[阶段五] ✅ 已保存宽表：{save_path}")
-    print(f"[阶段五] 共 {df.shape[0]} 个样本，{len(other_cols)} 个检查项目列")
+    print(f"[阶段四] ✅ 已保存宽表：{save_path}")
+    print(f"[阶段四] 共 {df.shape[0]} 个样本，{len(other_cols)} 个检查项目列")
     return df
 
 
 # ============================================================
-# 主流程：串联五个阶段
+# 主流程：串联四个阶段（原五阶段去掉数据库提取阶段后重新编号）
 # ============================================================
 def run_pipeline(
-    db_config: Dict[str, Any],
-    lab_table_config_path: Path,
-    disease_patient_csv: Dict[str, Path],
+    disease_raw_dirs: Dict[str, Path],
     work_root: Path,
     class_label_map: Dict[str, int],
     missing_ratio_threshold: float = MISSING_RATIO_THRESHOLD,
-    run_db_extraction: bool = True,
 ) -> None:
     """
-    按疾病批量执行「数据库提取 -> 三级筛选 -> 自然语言/宽表转换」完整流程
+    按疾病批量执行「本地 JSON 输入 -> 三级筛选 -> 自然语言/宽表转换」完整流程
 
     参数:
-        db_config: MySQL 连接参数
-        lab_table_config_path: 患者编号->检验表名映射的 config.json 路径
-        disease_patient_csv: 疾病名 -> 患者编号 CSV 路径 的映射（阶段一输入）
+        disease_raw_dirs: 疾病名 -> 本地已存在的单患者 JSON 文件目录 的映射
+            （替代原「阶段一：数据库提取」，样本需已提前落盘）
         work_root: 工作根目录，各阶段中间产物均在此目录下按疾病建子目录
         class_label_map: 疾病名 -> 类别标签 的映射（如 {"AIH": 0, "PBC": 1, ...}）
-        missing_ratio_threshold: 阶段四的非缺失占比阈值
-        run_db_extraction: 是否执行阶段一数据库提取；若样本已在本地，
-            可设为 False 直接从阶段二开始
+        missing_ratio_threshold: 阶段三的非缺失占比阈值
 
     返回值:
         无
 
+    异常:
+        FileNotFoundError: 当某疾病对应的 raw_dir 不存在时
+
     示例:
         >>> run_pipeline(
-        ...     db_config={"user": "root", "password": "***", "host": "192.168.13.16",
-        ...                "port": 3330, "database": "youan", "raise_on_warnings": True},
-        ...     lab_table_config_path=Path("config.json"),
-        ...     disease_patient_csv={"AIH": Path("hit_自身免疫性肝炎_earliest.csv")},
+        ...     disease_raw_dirs={"AIH": Path("/data/AIH_raw"), "PBC": Path("/data/PBC_raw")},
         ...     work_root=Path("/home/LLM/YA_LLM_data_v2"),
         ...     class_label_map={"AIH": 0, "PBC": 1, "DILI": 2, "CHB": 3},
         ... )
     """
-    with open(lab_table_config_path, "r", encoding="utf-8") as f:
-        lab_table_config = json.load(f)
-
     disease_names = list(class_label_map.keys())
-    filtered_dirs: List[Path] = []   # 收集阶段四输出目录，供阶段五使用
+    filtered_dirs: List[Path] = []   # 收集阶段三输出目录，供阶段四使用
     class_labels: List[int] = []
 
     for disease in disease_names:
-        raw_dir = work_root / f"{disease}_raw"
+        raw_dir = disease_raw_dirs.get(disease)
+        if raw_dir is None:
+            raise FileNotFoundError(f"疾病 {disease} 未提供本地 JSON 目录（--raw-dir）")
+        if not raw_dir.is_dir():
+            raise FileNotFoundError(f"疾病 {disease} 对应的目录不存在：{raw_dir}")
+
         nonempty_dir = work_root / f"{disease}_filtered"
         threshold_stats_csv = work_root / f"{disease}_stats.csv"
         cleaned_dir = work_root / f"{disease}_cleaned"
 
-        # ---------- 阶段一：数据库提取 ----------
-        if run_db_extraction:
-            patient_ids = pd.read_csv(disease_patient_csv[disease], usecols=["患者编号"])["患者编号"].tolist()
-            extract_patient_jsons(db_config, lab_table_config, patient_ids, raw_dir)
-
-        # ---------- 阶段二：筛除检验为空的样本 ----------
+        # ---------- 阶段一：筛除检验为空的样本 ----------
         filter_empty_lab_batch(raw_dir, nonempty_dir, file_pattern="*.json")
 
-        # ---------- 阶段三：删除检验全为 -1 的样本（原地过滤） ----------
+        # ---------- 阶段二：删除检验全为 -1 的样本（原地过滤） ----------
         remove_all_negative_samples(nonempty_dir)
 
-        # ---------- 阶段四：按缺失率与年龄筛选 ----------
+        # ---------- 阶段三：按缺失率与年龄筛选 ----------
         filter_by_missing_ratio_and_age(
             nonempty_dir, threshold_stats_csv, cleaned_dir, threshold=missing_ratio_threshold
         )
@@ -604,11 +482,11 @@ def run_pipeline(
         filtered_dirs.append(cleaned_dir)
         class_labels.append(class_label_map[disease])
 
-    # ---------- 阶段五：自然语言转换 + 宽表汇总 ----------
-    nl_save_dir = work_root / f"total_nl_labels_0.2_{missing_ratio_threshold}"
+    # ---------- 阶段四：自然语言转换 + 宽表汇总 ----------
+    nl_save_dir = work_root / f"total_nl_labels_{missing_ratio_threshold}"
     merge_all_to_nl(filtered_dirs, class_labels, nl_save_dir, file_pattern="*.json")
 
-    wide_table_path = work_root / f"lab_results_df_0.2_{missing_ratio_threshold}.xlsx"
+    wide_table_path = work_root / f"lab_results_df_{missing_ratio_threshold}.xlsx"
     create_lab_wide_table(filtered_dirs, class_labels, wide_table_path, file_pattern="*.json")
 
     print("\n✅ 全部流程执行完成！")
@@ -648,31 +526,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         配置好的 ArgumentParser 对象
     """
     parser = argparse.ArgumentParser(
-        description="肝病多病种患者数据完整处理流程（数据库提取 -> 三级筛选 -> 自然语言/宽表转换）"
+        description="肝病多病种患者数据处理流程（本地 JSON 输入 -> 三级筛选 -> 自然语言/宽表转换）"
     )
 
-    parser.add_argument("--work-root", required=True, type=Path,
+    parser.add_argument("--work-root", required=True, type=Path,default='workspace',
                          help="工作根目录，各阶段中间产物均在此目录下按疾病建子目录")
-    parser.add_argument("--lab-table-config", required=True, type=Path,
-                         help="患者编号->检验表名映射的 config.json 路径")
 
     parser.add_argument("--class-labels", required=True, nargs="+", metavar="疾病名=标签",
                          help="疾病名与类别标签的映射，如 AIH=0 PBC=1 DILI=2 CHB=3")
-    parser.add_argument("--disease-csv", nargs="*", default=[], metavar="疾病名=CSV路径",
-                         help="疾病名与患者编号 CSV 路径的映射（仅数据库提取阶段需要），"
-                              "如 AIH=hit_AIH_earliest.csv")
-
-    parser.add_argument("--db-host", default=None, help="MySQL 主机地址")
-    parser.add_argument("--db-port", type=int, default=3306, help="MySQL 端口，默认 3306")
-    parser.add_argument("--db-user", default=None, help="MySQL 用户名")
-    parser.add_argument("--db-password", default=None,
-                         help="MySQL 密码；出于安全考虑，也可通过环境变量 PIPELINE_DB_PASSWORD 传入")
-    parser.add_argument("--db-database", default=None, help="MySQL 数据库名")
+    parser.add_argument("--raw-dir", required=True, nargs="+", metavar="疾病名=JSON目录路径",
+                         help="疾病名与本地已存在的单患者 JSON 文件目录的映射，"
+                              "如 AIH=/data/AIH_raw PBC=/data/PBC_raw")
 
     parser.add_argument("--missing-ratio-threshold", type=float, default=MISSING_RATIO_THRESHOLD,
-                         help=f"阶段四非缺失检验项占比阈值，默认 {MISSING_RATIO_THRESHOLD}")
-    parser.add_argument("--skip-db-extraction", action="store_true",
-                         help="跳过阶段一数据库提取，直接使用 {work_root}/{疾病名}_raw 下已有样本")
+                         help=f"阶段三非缺失检验项占比阈值，默认 {MISSING_RATIO_THRESHOLD}")
 
     return parser
 
@@ -681,38 +548,17 @@ if __name__ == "__main__":
     args = build_arg_parser().parse_args()
 
     class_label_map = _parse_key_value_list(args.class_labels, value_caster=int)
-    disease_patient_csv = {k: Path(v) for k, v in _parse_key_value_list(args.disease_csv).items()}
+    disease_raw_dirs = {k: Path(v) for k, v in _parse_key_value_list(args.raw_dir).items()}
 
-    run_db_extraction = not args.skip_db_extraction
-    if run_db_extraction:
-        missing_diseases = set(class_label_map) - set(disease_patient_csv)
-        if missing_diseases:
-            raise SystemExit(
-                f"需要执行数据库提取，但以下疾病未通过 --disease-csv 提供患者编号 CSV：{missing_diseases}"
-            )
-        db_password = args.db_password or os.environ.get("PIPELINE_DB_PASSWORD")
-        if not all([args.db_host, args.db_user, db_password, args.db_database]):
-            raise SystemExit(
-                "需要执行数据库提取，请通过 --db-host/--db-user/--db-password/--db-database "
-                "（或环境变量 PIPELINE_DB_PASSWORD）提供完整连接信息，或使用 --skip-db-extraction 跳过"
-            )
-        db_config = {
-            "user": args.db_user,
-            "password": db_password,
-            "host": args.db_host,
-            "port": args.db_port,
-            "database": args.db_database,
-            "raise_on_warnings": True,
-        }
-    else:
-        db_config = {}
+    missing_diseases = set(class_label_map) - set(disease_raw_dirs)
+    if missing_diseases:
+        raise SystemExit(
+            f"以下疾病未通过 --raw-dir 提供本地 JSON 目录：{missing_diseases}"
+        )
 
     run_pipeline(
-        db_config=db_config,
-        lab_table_config_path=args.lab_table_config,
-        disease_patient_csv=disease_patient_csv,
+        disease_raw_dirs=disease_raw_dirs,
         work_root=args.work_root,
         class_label_map=class_label_map,
         missing_ratio_threshold=args.missing_ratio_threshold,
-        run_db_extraction=run_db_extraction,
     )

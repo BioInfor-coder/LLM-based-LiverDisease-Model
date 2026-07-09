@@ -234,6 +234,7 @@ DRUG_DICT: Dict[str, List[str]] = {
     ]
 }
 
+# 删除单独的"停药"，改为更严格的短语，
 # 避免在非 DILI 场景中（如"监测药物副作用"等）产生误触发
 DILI_KEYWORDS: List[str] = [
     "立即停用所有可疑药物",
