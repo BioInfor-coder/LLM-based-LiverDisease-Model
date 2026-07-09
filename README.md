@@ -13,7 +13,7 @@ Standalone scripts for clinical data extraction, de-identification, data cleanin
 │   ├── data_preprocessing.py
 │   ├── clean_drug_keywords.py
 │   └── clean_lab_results.py
-├── Modeling/
+├── Pipeline/
 │   ├── config.py
 │   ├── training.py
 │   ├── metrics.py
