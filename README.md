@@ -115,7 +115,7 @@ Four scripts that take the embeddings/labels/lab-results table produced above an
 | `metrics.py` | Weighted/macro sensitivity, specificity, and AUC computation; Bootstrap 95% CI; all plotting (confusion matrices, ROC curves, CV/Hold-out comparison charts, dimensionality-reduction diagnostic plots); best-hyperparameter report generation (per-fold CSV, JSON, text summary) |
 | `pipeline.py` | `run_pipeline(...)` — the main orchestration function — plus an `argparse` CLI entry point (`python pipeline.py --...`) |
 
-`pipeline.py`, `training.py`, and `metrics.py` import from each other via plain module imports (`from config import ...`, `from training import ...`), so all four files must sit in the same directory.
+`main.py`, `training.py`, and `metrics.py` import from each other via plain module imports (`from config import ...`, `from training import ...`), so all four files must sit in the same directory.
 
 ### Command-line usage
 
@@ -198,7 +198,7 @@ pip install torch transformers
 # DataEmbedding/doc2vec_embedding.py
 pip install gensim numpy
 
-# Modeling/config.py, training.py, metrics.py, pipeline.py
+# Modeling/config.py, training.py, metrics.py, main.py
 pip install numpy pandas scikit-learn matplotlib seaborn scipy joblib xgboost umap-learn
 ```
 
