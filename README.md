@@ -87,7 +87,7 @@ python DataEmbedding/LLM_embedding.py \
 Batch-encodes text lines into normalized sentence embeddings using a local BGE-M3 model, via mean pooling + L2 normalization.
 
 ```bash
-python DataEmbedding/bge_m3_embedding.py \
+python DataEmbedding/bge-m3_embedding.py \
   --model_path ./bge-m3 \
   --input_path ./data/total.txt \
   --output_path ./data/total_afterembedding_bge-m3.txt
@@ -152,7 +152,7 @@ python Pipeline/main.py \
 ### Python usage
 
 ```python
-from pipeline import run_pipeline
+from main import run_pipeline
 
 run_pipeline(
     labels_path="./data/total_nl_labels_0.6/labels.txt",
