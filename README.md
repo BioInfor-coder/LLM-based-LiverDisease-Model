@@ -15,10 +15,10 @@ Standalone scripts for clinical data extraction, de-identification, data cleanin
 │   └── clean_lab_results.py
 ├── DataSample/
 │   ├── RawData/
-│   │   ├── AIH/    (126 example per-patient JSON files)
-│   │   ├── PBC/    (126 example per-patient JSON files)
-│   │   ├── DILI/   (126 example per-patient JSON files)
-│   │   └── CHB/    (126 example per-patient JSON files)
+│   │   ├── AIH/    
+│   │   ├── PBC/  
+│   │   ├── DILI/  
+│   │   └── CHB/   
 │   ├── sampled_total.txt
 │   └── sampled_labels.txt
 ├── Pipeline/
