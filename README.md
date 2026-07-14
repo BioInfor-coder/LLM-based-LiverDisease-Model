@@ -104,7 +104,7 @@ python DataEmbedding/doc2vec_embedding.py \
   --vector_size 384 --epochs 40 --model_save_path ./doc2vec_model.bin
 ```
 
-## 7. Modeling Pipeline (`Modeling/`)
+## 7. Modeling Pipeline (`Pipeline/`)
 
 Four scripts that take the embeddings/labels/lab-results table produced above and run a full multi-algorithm classification workflow: per-fold dimensionality reduction (no data leakage), standard k-fold hyperparameter selection, 5-fold CV evaluation, full-training-set retraining, and Internal Hold-out evaluation with Bootstrap 95% confidence intervals.
 
