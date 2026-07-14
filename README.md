@@ -195,10 +195,10 @@ run_pipeline(
 ```
 DataSample/
 ├── RawData/
-│   ├── AIH/    126 example per-patient JSON files
-│   ├── PBC/    126 example per-patient JSON files
-│   ├── DILI/   126 example per-patient JSON files
-│   └── CHB/    126 example per-patient JSON files
+│   ├── AIH/   
+│   ├── PBC/   
+│   ├── DILI/   
+│   └── CHB/   
 ├── sampled_total.txt
 └── sampled_labels.txt
 ```
