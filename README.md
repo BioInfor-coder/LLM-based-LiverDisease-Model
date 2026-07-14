@@ -17,7 +17,7 @@ Standalone scripts for clinical data extraction, de-identification, data cleanin
 │   ├── config.py
 │   ├── training.py
 │   ├── metrics.py
-│   └── pipeline.py
+│   └── main.py
 └── README.md
 ```
 
