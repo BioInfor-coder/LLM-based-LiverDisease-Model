@@ -13,6 +13,14 @@ Standalone scripts for clinical data extraction, de-identification, data cleanin
 │   ├── data_preprocessing.py
 │   ├── clean_drug_keywords.py
 │   └── clean_lab_results.py
+├── DataSample/
+│   ├── RawData/
+│   │   ├── AIH/    (126 example per-patient JSON files)
+│   │   ├── PBC/    (126 example per-patient JSON files)
+│   │   ├── DILI/   (126 example per-patient JSON files)
+│   │   └── CHB/    (126 example per-patient JSON files)
+│   ├── sampled_total.txt
+│   └── sampled_labels.txt
 ├── Pipeline/
 │   ├── config.py
 │   ├── training.py
@@ -21,17 +29,19 @@ Standalone scripts for clinical data extraction, de-identification, data cleanin
 └── README.md
 ```
 
+> All files under `DataSample/` are synthetically generated and do not represent, or derive from, any real patient. See [Example Data (`DataSample/`)](#example-data-datasample) below.
+
 ## 1. `DataProcessing/data_preprocessing.py`
 
 Runs a four-stage local pipeline over already-extracted per-patient JSON files (one JSON file per patient, organized per disease): (1) drop samples with an empty lab-test list, (2) drop samples whose lab results are entirely placeholder values, (3) filter by missing-ratio and adult-age threshold while writing per-disease statistics CSVs, and (4) merge all surviving samples into a natural-language text corpus (`total.txt` + `labels.txt`) and a wide-format lab-results Excel table.
 
-> Note: the previous MySQL-extraction stage has been removed from this script. Patient JSON files must already exist locally (e.g. produced by a separate extraction step); you now point the script at those directories directly via `--raw-dir`.
+> Note: the previous MySQL-extraction stage has been removed from this script. Patient JSON files must already exist locally (e.g. produced by a separate extraction step); you now point the script at those directories directly via `--raw-dir`. The synthetic sample files under [`DataSample/RawData/`](#example-data-datasample) follow this exact per-patient JSON format and can be used to run the command below out of the box.
 
 ```bash
 python DataProcessing/data_preprocessing.py \
   --work-root ./data/YA_LLM_data_v2 \
   --class-labels AIH=0 PBC=1 DILI=2 CHB=3 \
-  --raw-dir AIH=./raw/AIH_raw PBC=./raw/PBC_raw DILI=./raw/DILI_raw CHB=./raw/CHB_raw \
+  --raw-dir AIH=./DataSample/RawData/AIH PBC=./DataSample/RawData/PBC DILI=./DataSample/RawData/DILI CHB=./DataSample/RawData/CHB \
   --missing-ratio-threshold 0.6
 ```
 
@@ -82,7 +92,7 @@ python DataEmbedding/LLM_embedding.py \
   --cuda_visible_devices 0,1,2,3
 ```
 
-## 5. `DataEmbedding/bge_m3_embedding.py`
+## 5. `DataEmbedding/bge-m3_embedding.py`
 
 Batch-encodes text lines into normalized sentence embeddings using a local BGE-M3 model, via mean pooling + L2 normalization.
 
@@ -113,7 +123,7 @@ Four scripts that take the embeddings/labels/lab-results table produced above an
 | `config.py` | Global constants (`N_SPLITS`, `RANDOM_SEED`, `AUTO_VARIANCE_THRESHOLD`, `HYPERPARAM_SELECTION_SCORING`, `DEFAULT_TEST_SIZE`, etc.) shared by the other three scripts |
 | `training.py` | Data loading (raw vectors / labels / Excel features), train/Hold-out splitting (time-based or stratified random), dimensionality reduction (PCA/ScaledPCA/LDA/UMAP/Auto, with caching and diagnostic plots), classifier configs (RF/MLP/LR/XGBoost/SVM) with GridSearch grids, standard k-fold hyperparameter selection, and single-fold training/evaluation with a fixed hyperparameter set |
 | `metrics.py` | Weighted/macro sensitivity, specificity, and AUC computation; Bootstrap 95% CI; all plotting (confusion matrices, ROC curves, CV/Hold-out comparison charts, dimensionality-reduction diagnostic plots); best-hyperparameter report generation (per-fold CSV, JSON, text summary) |
-| `pipeline.py` | `run_pipeline(...)` — the main orchestration function — plus an `argparse` CLI entry point (`python pipeline.py --...`) |
+| `main.py` | `run_pipeline(...)` — the main orchestration function — plus an `argparse` CLI entry point (`python main.py --...`) |
 
 `main.py`, `training.py`, and `metrics.py` import from each other via plain module imports (`from config import ...`, `from training import ...`), so all four files must sit in the same directory.
 
@@ -180,6 +190,26 @@ run_pipeline(
 - `best_models/`, `final_retrained_models/` — pickled model bundles (classifier + reducer + scaler + selected hyperparameters) retrained on the full training set
 - `config.json` — full run configuration for reproducibility
 
+## Example Data (`DataSample/`)
+
+```
+DataSample/
+├── RawData/
+│   ├── AIH/    126 example per-patient JSON files
+│   ├── PBC/    126 example per-patient JSON files
+│   ├── DILI/   126 example per-patient JSON files
+│   └── CHB/    126 example per-patient JSON files
+├── sampled_total.txt
+└── sampled_labels.txt
+```
+
+**All records under `DataSample/` are synthetically generated and do not represent, or derive from, any real patient.** No data in this repository was extracted from the original hospital EMR system.
+
+- `RawData/<disease>/*.json` illustrates the expected per-patient input format consumed by `DataProcessing/data_preprocessing.py --raw-dir`: structured fields (demographics, pathology, ultrasound/imaging, lab results) alongside free-text findings, organized one JSON file per synthetic patient, per disease.
+- `sampled_total.txt` and `sampled_labels.txt` illustrate the merged natural-language corpus and integer-label format that `data_preprocessing.py` produces and that the embedding scripts (`DataEmbedding/`) and modeling pipeline (`Pipeline/`) consume as input.
+
+These files exist solely to document the expected data schema and to let users run the full pipeline end-to-end without access to, or need for, the original patient data.
+
 ## Requirements
 
 ```bash
@@ -192,13 +222,13 @@ pip install pandas openpyxl
 # DataProcessing/clean_lab_results.py
 pip install pandas scikit-learn openpyxl
 
-# DataEmbedding/LLM_embedding.py, DataEmbedding/bge_m3_embedding.py
+# DataEmbedding/LLM_embedding.py, DataEmbedding/bge-m3_embedding.py
 pip install torch transformers
 
 # DataEmbedding/doc2vec_embedding.py
 pip install gensim numpy
 
-# Modeling/config.py, training.py, metrics.py, main.py
+# Pipeline/config.py, training.py, metrics.py, main.py
 pip install numpy pandas scikit-learn matplotlib seaborn scipy joblib xgboost umap-learn
 ```
 
