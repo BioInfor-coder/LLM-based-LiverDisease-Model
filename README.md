@@ -120,7 +120,7 @@ Four scripts that take the embeddings/labels/lab-results table produced above an
 ### Command-line usage
 
 ```bash
-python Modeling/pipeline.py \
+python Pipeline/main.py \
   --labels_path ./data/total_nl_labels_0.6/labels.txt \
   --raw_vectors_path ./data/total_afterembedding_Qwen3.txt \
   --output_dir ./models/Qwen3_run \
